@@ -8,3 +8,6 @@
 - Implement hash-object command with -w flag support
 - Add cat-file -p command with multi-platform decompression
 - Remove OpenSSL dependency in favor of custom SHA-1
+- Add ls-tree command with --name-only flag support
+- Implement tree object parsing and display
+- Add multi-platform decompression support for tree objects

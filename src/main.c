@@ -383,6 +383,183 @@ int cmd_cat_file(int argc, char *argv[]) {
     return 1;
 }
 
+// Function to handle the ls-tree command
+int cmd_ls_tree(int argc, char *argv[]) {
+    int name_only = 0;
+    const char *tree_sha = NULL;
+    
+    // Parse arguments
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--name-only") == 0) {
+            name_only = 1;
+        } else {
+            tree_sha = argv[i];
+        }
+    }
+    
+    if (tree_sha == NULL) {
+        fprintf(stderr, "Usage: ls-tree [--name-only] <tree-sha>\n");
+        return 1;
+    }
+    
+    if (strlen(tree_sha) != 40) {
+        fprintf(stderr, "Invalid tree hash\n");
+        return 1;
+    }
+    
+    // Construct path to the tree object
+    char path[1024];
+    snprintf(path, sizeof(path), ".git/objects/%c%c/%s", tree_sha[0], tree_sha[1], tree_sha + 2);
+    
+    // Check if file exists
+    if (access(path, F_OK) != 0) {
+        fprintf(stderr, "Not a valid tree object: %s\n", tree_sha);
+        return 1;
+    }
+    
+    // Create temporary file for decompressed content
+    char tmp_path[1024];
+    snprintf(tmp_path, sizeof(tmp_path), "/tmp/git_tree_%s", tree_sha);
+    
+    // Try to decompress using various methods
+    int decompression_success = 0;
+    char cmd[2048];
+    
+    // Try using perl
+    snprintf(cmd, sizeof(cmd), 
+        "perl -MCompress::Zlib -e 'undef $/; open(F, \"%s\"); $c = join(\"\", <F>); close(F); "
+        "$u = uncompress($c); open(F, \">%s\"); print F $u; close(F);' 2>/dev/null", 
+        path, tmp_path);
+    
+    if (system(cmd) == 0) {
+        decompression_success = 1;
+    }
+    
+    // Try Python if perl failed
+    if (!decompression_success) {
+        snprintf(cmd, sizeof(cmd), 
+            "python3 -c 'import zlib, sys; "
+            "data = open(\"%s\", \"rb\").read(); "
+            "decompressed = zlib.decompress(data); "
+            "open(\"%s\", \"wb\").write(decompressed)' 2>/dev/null", 
+            path, tmp_path);
+        
+        if (system(cmd) == 0) {
+            decompression_success = 1;
+        }
+    }
+    
+    // Try Python2 if Python3 failed
+    if (!decompression_success) {
+        snprintf(cmd, sizeof(cmd), 
+            "python -c 'import zlib, sys; "
+            "data = open(\"%s\", \"rb\").read(); "
+            "decompressed = zlib.decompress(data); "
+            "open(\"%s\", \"wb\").write(decompressed)' 2>/dev/null", 
+            path, tmp_path);
+        
+        if (system(cmd) == 0) {
+            decompression_success = 1;
+        }
+    }
+    
+    if (!decompression_success) {
+        fprintf(stderr, "Failed to decompress the tree object\n");
+        return 1;
+    }
+    
+    // Open the decompressed file
+    FILE *file = fopen(tmp_path, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "Failed to open decompressed file: %s\n", strerror(errno));
+        unlink(tmp_path);
+        return 1;
+    }
+    
+    // Skip the header (tree <size>\0)
+    char buffer[1024];
+    if (!fgets(buffer, sizeof(buffer), file)) {
+        fprintf(stderr, "Failed to read file header\n");
+        fclose(file);
+        unlink(tmp_path);
+        return 1;
+    }
+    
+    // Find the null byte in the header
+    char *null_pos = memchr(buffer, '\0', sizeof(buffer));
+    if (null_pos == NULL) {
+        fprintf(stderr, "Invalid tree object format\n");
+        fclose(file);
+        unlink(tmp_path);
+        return 1;
+    }
+    
+    // Reset file position to just after the null byte
+    long header_len = null_pos - buffer + 1;
+    fseek(file, header_len, SEEK_SET);
+    
+    // Read and process each entry
+    while (1) {
+        // Read mode (up to space)
+        char mode[10];
+        int mode_idx = 0;
+        int c;
+        
+        while ((c = fgetc(file)) != EOF && c != ' ' && mode_idx < sizeof(mode) - 1) {
+            mode[mode_idx++] = (char)c;
+        }
+        
+        if (c == EOF) break;
+        
+        mode[mode_idx] = '\0';
+        
+        // Read name (up to null byte)
+        char name[1024];
+        int name_idx = 0;
+        
+        while ((c = fgetc(file)) != EOF && c != '\0' && name_idx < sizeof(name) - 1) {
+            name[name_idx++] = (char)c;
+        }
+        
+        if (c == EOF) break;
+        
+        name[name_idx] = '\0';
+        
+        // Read 20-byte SHA (raw bytes)
+        unsigned char sha_bytes[20];
+        if (fread(sha_bytes, 1, 20, file) != 20) {
+            if (feof(file)) break;
+            fprintf(stderr, "Failed to read SHA bytes\n");
+            fclose(file);
+            unlink(tmp_path);
+            return 1;
+        }
+        
+        // Convert binary SHA to hex
+        char sha_hex[41];
+        for (int i = 0; i < 20; i++) {
+            sprintf(&sha_hex[i*2], "%02x", sha_bytes[i]);
+        }
+        sha_hex[40] = '\0';
+        
+        // Determine type (blob or tree) based on mode
+        const char *type = strcmp(mode, "40000") == 0 ? "tree" : "blob";
+        
+        // Output based on the --name-only flag
+        if (name_only) {
+            printf("%s\n", name);
+        } else {
+            // Display leading zeros for the mode as in Git's output
+            printf("%06s %s %s\t%s\n", mode, type, sha_hex, name);
+        }
+    }
+    
+    fclose(file);
+    unlink(tmp_path);
+    return 0;
+}
+
+// Update main function to handle ls-tree command
 int main(int argc, char *argv[]) {
     // Disable output buffering
     setbuf(stdout, NULL);
@@ -419,6 +596,8 @@ int main(int argc, char *argv[]) {
         return cmd_cat_file(argc, argv);
     } else if (strcmp(command, "hash-object") == 0) {
         return cmd_hash_object(argc, argv);
+    } else if (strcmp(command, "ls-tree") == 0) {
+        return cmd_ls_tree(argc, argv);
     } else {
         fprintf(stderr, "Unknown command %s\n", command);
         return 1;
