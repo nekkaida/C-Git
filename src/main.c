@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <time.h>  // Add this for time() function
 typedef struct {
     unsigned int state[5];
     unsigned int count[2];
@@ -842,7 +843,204 @@ int cmd_write_tree() {
     return 0;
 }
 
-// Update main function to include write-tree
+int cmd_commit_tree(int argc, char *argv[]) {
+    const char *tree_sha = NULL;
+    const char *parent_sha = NULL;
+    const char *message = NULL;
+    
+    // Parse arguments
+    if (argc < 3) {
+        fprintf(stderr, "Usage: commit-tree <tree-sha> -p <parent-commit> -m <message>\n");
+        return 1;
+    }
+    
+    tree_sha = argv[2];
+    
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+            parent_sha = argv[i + 1];
+            i++;
+        } else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc) {
+            message = argv[i + 1];
+            i++;
+        }
+    }
+    
+    if (tree_sha == NULL || message == NULL) {
+        fprintf(stderr, "Missing required arguments\n");
+        return 1;
+    }
+    
+    // Validate tree SHA
+    if (strlen(tree_sha) != 40) {
+        fprintf(stderr, "Invalid tree SHA\n");
+        return 1;
+    }
+    
+    // Validate parent SHA if provided
+    if (parent_sha != NULL && strlen(parent_sha) != 40) {
+        fprintf(stderr, "Invalid parent commit SHA\n");
+        return 1;
+    }
+    
+    // Hardcoded author/committer info
+    const char *author = "Example Author <author@example.com>";
+    const char *committer = "Example Committer <committer@example.com>";
+    
+    // Get current timestamp
+    time_t now = time(NULL);
+    int timezone = -7 * 3600; // Hardcoded timezone offset (e.g., PDT: UTC-7)
+    int timezone_hours = timezone / 3600;
+    char timezone_str[6];
+    snprintf(timezone_str, sizeof(timezone_str), "%+03d00", timezone_hours);
+    
+    // Format commit content
+    // Format: tree <sha>\nparent <sha>\nauthor <name+email> <timestamp> <timezone>\ncommitter <name+email> <timestamp> <timezone>\n\n<message>\n
+    
+    // Calculate buffer size needed
+    size_t buffer_size = 100; // Base size for fixed parts
+    buffer_size += strlen(tree_sha);
+    if (parent_sha != NULL) {
+        buffer_size += 8 + strlen(parent_sha); // "parent " + sha + "\n"
+    }
+    buffer_size += strlen(author) + 20; // Author info + timestamp + timezone
+    buffer_size += strlen(committer) + 20; // Committer info + timestamp + timezone
+    buffer_size += strlen(message) + 2; // Message + newlines
+    
+    char *commit_content = malloc(buffer_size);
+    if (commit_content == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return 1;
+    }
+    
+    // Build the commit content
+    int content_len = 0;
+    
+    // Tree
+    content_len += sprintf(commit_content + content_len, "tree %s\n", tree_sha);
+    
+    // Parent (if provided)
+    if (parent_sha != NULL) {
+        content_len += sprintf(commit_content + content_len, "parent %s\n", parent_sha);
+    }
+    
+    // Author
+    content_len += sprintf(commit_content + content_len, "author %s %ld %s\n", 
+                          author, (long)now, timezone_str);
+    
+    // Committer
+    content_len += sprintf(commit_content + content_len, "committer %s %ld %s\n", 
+                          committer, (long)now, timezone_str);
+    
+    // Blank line + message
+    content_len += sprintf(commit_content + content_len, "\n%s\n", message);
+    
+    // Create header: "commit <size>\0"
+    char header[100];
+    int header_len = snprintf(header, sizeof(header), "commit %d", content_len);
+    header[header_len] = '\0'; // Add null byte
+    header_len++; // Include null byte in length
+    
+    // Calculate SHA-1 hash
+    SHA1_CTX sha_ctx;
+    unsigned char hash[20]; // SHA-1 digest is 20 bytes
+    
+    SHA1Init(&sha_ctx);
+    SHA1Update(&sha_ctx, (unsigned char*)header, header_len);
+    SHA1Update(&sha_ctx, (unsigned char*)commit_content, content_len);
+    SHA1Final(hash, &sha_ctx);
+    
+    // Convert hash to hex string
+    char hash_hex[41];
+    hash_to_hex(hash, hash_hex);
+    
+    // Create directories for the object
+    char dir_path[100];
+    snprintf(dir_path, sizeof(dir_path), ".git/objects/%c%c", hash_hex[0], hash_hex[1]);
+    
+    if (mkdir(dir_path, 0755) == -1 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create directory %s: %s\n", dir_path, strerror(errno));
+        free(commit_content);
+        return 1;
+    }
+    
+    // Create the object file path
+    char obj_path[150];
+    snprintf(obj_path, sizeof(obj_path), "%s/%s", dir_path, hash_hex + 2);
+    
+    // Use system command to handle zlib compression
+    char tmp_path[150];
+    snprintf(tmp_path, sizeof(tmp_path), "/tmp/git_commit_%s", hash_hex);
+    
+    // Write header + content to temporary file
+    FILE *tmp_file = fopen(tmp_path, "wb");
+    if (tmp_file == NULL) {
+        fprintf(stderr, "Failed to create temporary file: %s\n", strerror(errno));
+        free(commit_content);
+        return 1;
+    }
+    
+    // Write header and content
+    fwrite(header, 1, header_len, tmp_file);
+    fwrite(commit_content, 1, content_len, tmp_file);
+    fclose(tmp_file);
+    
+    // Compress using system command (multiple options for compatibility)
+    int compression_success = 0;
+    char cmd[512];
+    
+    // Try perl
+    snprintf(cmd, sizeof(cmd), 
+        "perl -MCompress::Zlib -e 'undef $/; open(F,\"%s\");$i=join(\"\",<F>);close(F); "
+        "$c=compress($i);open(F,\">%s\");print F $c;close(F);' 2>/dev/null", 
+        tmp_path, obj_path);
+    
+    if (system(cmd) == 0) {
+        compression_success = 1;
+    }
+    
+    // Try Python if perl failed
+    if (!compression_success) {
+        snprintf(cmd, sizeof(cmd), 
+            "python3 -c 'import zlib, sys; "
+            "data = open(\"%s\", \"rb\").read(); "
+            "compressed = zlib.compress(data); "
+            "open(\"%s\", \"wb\").write(compressed)' 2>/dev/null", 
+            tmp_path, obj_path);
+        
+        if (system(cmd) == 0) {
+            compression_success = 1;
+        }
+    }
+    
+    // Try Python2 if Python3 failed
+    if (!compression_success) {
+        snprintf(cmd, sizeof(cmd), 
+            "python -c 'import zlib, sys; "
+            "data = open(\"%s\", \"rb\").read(); "
+            "compressed = zlib.compress(data); "
+            "open(\"%s\", \"wb\").write(compressed)' 2>/dev/null", 
+            tmp_path, obj_path);
+        
+        if (system(cmd) == 0) {
+            compression_success = 1;
+        }
+    }
+    
+    // Clean up temporary file
+    unlink(tmp_path);
+    free(commit_content);
+    
+    if (!compression_success) {
+        fprintf(stderr, "Failed to compress and write commit object\n");
+        return 1;
+    }
+    
+    // Output the commit hash
+    printf("%s\n", hash_hex);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     // Disable output buffering
     setbuf(stdout, NULL);
@@ -883,6 +1081,8 @@ int main(int argc, char *argv[]) {
         return cmd_ls_tree(argc, argv);
     } else if (strcmp(command, "write-tree") == 0) {
         return cmd_write_tree();
+    } else if (strcmp(command, "commit-tree") == 0) {
+        return cmd_commit_tree(argc, argv);
     } else {
         fprintf(stderr, "Unknown command %s\n", command);
         return 1;

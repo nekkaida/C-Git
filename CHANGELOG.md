@@ -15,3 +15,7 @@
 - Implement proper Git tree object format and storage
 - Add support for both files and directories
 - Implement Git-compatible entry sorting
+- Add commit-tree command with proper object format
+- Implement commit object creation and storage
+- Add parent commit support
+- Add timestamp and timezone handling
