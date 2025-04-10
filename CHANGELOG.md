@@ -11,3 +11,7 @@
 - Add ls-tree command with --name-only flag support
 - Implement tree object parsing and display
 - Add multi-platform decompression support for tree objects
+- Add write-tree command with recursive directory traversal
+- Implement proper Git tree object format and storage
+- Add support for both files and directories
+- Implement Git-compatible entry sorting
