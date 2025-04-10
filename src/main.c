@@ -4,10 +4,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
-// Remove OpenSSL include
-// #include <openssl/sha.h>
-
-// Simple SHA-1 implementation
+#include <dirent.h>
 typedef struct {
     unsigned int state[5];
     unsigned int count[2];
@@ -134,7 +131,9 @@ void hash_to_hex(unsigned char *hash, char *hex) {
     hex[40] = '\0';
 }
 
-// Function to handle the hash-object command
+// Add function prototype for hash_file
+char* hash_file(const char *filename, int write_object);
+
 int cmd_hash_object(int argc, char *argv[]) {
     int write_object = 0;
     const char *filename = NULL;
@@ -153,11 +152,23 @@ int cmd_hash_object(int argc, char *argv[]) {
         return 1;
     }
     
+    char *hash = hash_file(filename, write_object);
+    if (hash == NULL) {
+        return 1;
+    }
+    
+    printf("%s\n", hash);
+    free(hash);
+    return 0;
+}
+
+// Add this helper function
+char* hash_file(const char *filename, int write_object) {
     // Read the file
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
         fprintf(stderr, "Failed to open file %s: %s\n", filename, strerror(errno));
-        return 1;
+        return NULL;
     }
     
     // Get file size
@@ -170,7 +181,7 @@ int cmd_hash_object(int argc, char *argv[]) {
     if (content == NULL) {
         fprintf(stderr, "Memory allocation failed\n");
         fclose(file);
-        return 1;
+        return NULL;
     }
     
     // Read file content
@@ -178,7 +189,7 @@ int cmd_hash_object(int argc, char *argv[]) {
         fprintf(stderr, "Failed to read file %s\n", filename);
         free(content);
         fclose(file);
-        return 1;
+        return NULL;
     }
     fclose(file);
     
@@ -198,14 +209,10 @@ int cmd_hash_object(int argc, char *argv[]) {
     SHA1Final(hash, &sha_ctx);
     
     // Convert hash to hex string
-    char hash_hex[41];
+    char *hash_hex = malloc(41);
     hash_to_hex(hash, hash_hex);
     
-    // Print the hash
-    printf("%s\n", hash_hex);
-    
-    // Rest of function unchanged...
-    // Write object if -w flag is provided
+    // Write object if requested
     if (write_object) {
         // Create directories for the object
         char dir_path[100];
@@ -214,7 +221,8 @@ int cmd_hash_object(int argc, char *argv[]) {
         if (mkdir(dir_path, 0755) == -1 && errno != EEXIST) {
             fprintf(stderr, "Failed to create directory %s: %s\n", dir_path, strerror(errno));
             free(content);
-            return 1;
+            free(hash_hex);
+            return NULL;
         }
         
         // Create the object file path
@@ -230,7 +238,8 @@ int cmd_hash_object(int argc, char *argv[]) {
         if (tmp_file == NULL) {
             fprintf(stderr, "Failed to create temporary file: %s\n", strerror(errno));
             free(content);
-            return 1;
+            free(hash_hex);
+            return NULL;
         }
         
         // Write header and content
@@ -286,12 +295,13 @@ int cmd_hash_object(int argc, char *argv[]) {
         if (!compression_success) {
             fprintf(stderr, "Failed to compress and write object\n");
             free(content);
-            return 1;
+            free(hash_hex);
+            return NULL;
         }
     }
     
     free(content);
-    return 0;
+    return hash_hex;
 }
 
 // Function to handle the cat-file command
@@ -559,7 +569,280 @@ int cmd_ls_tree(int argc, char *argv[]) {
     return 0;
 }
 
-// Update main function to handle ls-tree command
+// Function prototype for write_tree_directory
+char* write_tree_directory(const char *dir_path);
+
+// Function to hash a tree directory and write it to .git/objects
+char* write_tree_directory(const char *dir_path) {
+    DIR *dir;
+    struct dirent *entry;
+    struct stat st;
+    char path[1024];
+    
+    // Entries for the tree object
+    typedef struct {
+        char mode[10];
+        char name[256];
+        char sha[41];  // 40 hex chars + null terminator
+        unsigned char sha_bytes[20];  // 20 binary bytes
+    } TreeEntry;
+
+    // Function to compare tree entries for sorting (corrected to match Git's behavior)
+    int compare_tree_entries(const void *a, const void *b) {
+        const TreeEntry *entry_a = (const TreeEntry *)a;
+        const TreeEntry *entry_b = (const TreeEntry *)b;
+        
+        // First compare by name
+        int name_cmp = strcmp(entry_a->name, entry_b->name);
+        if (name_cmp != 0) {
+            return name_cmp;
+        }
+        
+        // If names are equal, regular files come before directories
+        int a_is_dir = (strncmp(entry_a->mode, "40000", 5) == 0);
+        int b_is_dir = (strncmp(entry_b->mode, "40000", 5) == 0);
+        
+        return a_is_dir - b_is_dir;  // Regular files (0) come before directories (1)
+    }
+    
+    TreeEntry *entries = NULL;
+    int entry_count = 0;
+    
+    dir = opendir(dir_path);
+    if (dir == NULL) {
+        fprintf(stderr, "Failed to open directory %s: %s\n", dir_path, strerror(errno));
+        return NULL;
+    }
+    
+    // First pass: collect all entries
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and .. directories
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        // Skip .git directory
+        if (strcmp(entry->d_name, ".git") == 0) {
+            continue;
+        }
+        
+        // Construct full path
+        snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
+        
+        if (stat(path, &st) != 0) {
+            fprintf(stderr, "Failed to stat %s: %s\n", path, strerror(errno));
+            continue;
+        }
+        
+        // Resize entries array
+        entries = realloc(entries, sizeof(TreeEntry) * (entry_count + 1));
+        if (entries == NULL) {
+            fprintf(stderr, "Memory allocation failed\n");
+            closedir(dir);
+            return NULL;
+        }
+        
+        TreeEntry *current = &entries[entry_count];
+        strcpy(current->name, entry->d_name);
+        
+        if (S_ISDIR(st.st_mode)) {
+            // It's a directory, recursively write tree
+            strcpy(current->mode, "40000");
+            char *dir_sha = write_tree_directory(path);
+            if (dir_sha == NULL) {
+                fprintf(stderr, "Failed to write tree for %s\n", path);
+                free(entries);
+                closedir(dir);
+                return NULL;
+            }
+            strcpy(current->sha, dir_sha);
+            free(dir_sha);
+        } else if (S_ISREG(st.st_mode)) {
+            // It's a regular file, hash it
+            // 100644 is the mode for a regular file
+            strcpy(current->mode, "100644");
+            
+            char *hash = hash_file(path, 1); // 1 means write the object
+            if (hash == NULL) {
+                fprintf(stderr, "Failed to hash file %s\n", path);
+                free(entries);
+                closedir(dir);
+                return NULL;
+            }
+            strcpy(current->sha, hash);
+            free(hash);
+        } else {
+            // Skip other types of files
+            continue;
+        }
+        
+        // Convert hex SHA to binary
+        for (int i = 0; i < 20; i++) {
+            sscanf(&current->sha[i*2], "%2hhx", &current->sha_bytes[i]);
+        }
+        
+        entry_count++;
+    }
+    
+    closedir(dir);
+    
+    // Sort entries by name as Git does
+    if (entry_count > 1) {
+        qsort(entries, entry_count, sizeof(TreeEntry), compare_tree_entries);
+    }
+    
+    // Calculate tree content size
+    size_t content_size = 0;
+    for (int i = 0; i < entry_count; i++) {
+        // "<mode> <name>\0<20_byte_sha>"
+        content_size += strlen(entries[i].mode) + 1 + strlen(entries[i].name) + 1 + 20;
+    }
+    
+    // Create the header "tree <size>\0"
+    char header[100];
+    int header_size = snprintf(header, sizeof(header), "tree %zu", content_size);
+    header[header_size] = '\0';  // Add null terminator
+    header_size++;  // Include null terminator in size
+    
+    // Allocate memory for the complete tree object
+    size_t tree_size = header_size + content_size;
+    unsigned char *tree_data = malloc(tree_size);
+    if (tree_data == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        free(entries);
+        return NULL;
+    }
+    
+    // Copy header to tree_data
+    memcpy(tree_data, header, header_size);
+    
+    // Copy entries to tree_data
+    size_t offset = header_size;
+    for (int i = 0; i < entry_count; i++) {
+        // Write "<mode> <name>\0"
+        int mode_name_size = sprintf((char*)tree_data + offset, "%s %s", 
+                                     entries[i].mode, entries[i].name);
+        offset += mode_name_size;
+        tree_data[offset++] = '\0';  // Add null byte
+        
+        // Write 20-byte SHA
+        memcpy(tree_data + offset, entries[i].sha_bytes, 20);
+        offset += 20;
+    }
+    
+    // Calculate SHA-1 of the tree
+    SHA1_CTX sha_ctx;
+    unsigned char hash[20];
+    
+    SHA1Init(&sha_ctx);
+    SHA1Update(&sha_ctx, tree_data, tree_size);
+    SHA1Final(hash, &sha_ctx);
+    
+    // Convert hash to hex
+    char hash_hex[41];
+    hash_to_hex(hash, hash_hex);
+    
+    // Create directory for the object
+    char dir_name[100];
+    snprintf(dir_name, sizeof(dir_name), ".git/objects/%c%c", hash_hex[0], hash_hex[1]);
+    
+    if (mkdir(dir_name, 0755) == -1 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create directory %s: %s\n", dir_name, strerror(errno));
+        free(entries);
+        free(tree_data);
+        return NULL;
+    }
+    
+    // Create path for the object file
+    char obj_path[150];
+    snprintf(obj_path, sizeof(obj_path), "%s/%s", dir_name, hash_hex + 2);
+    
+    // Create temporary file for compression
+    char tmp_path[150];
+    snprintf(tmp_path, sizeof(tmp_path), "/tmp/git_tree_%s", hash_hex);
+    
+    FILE *tmp_file = fopen(tmp_path, "wb");
+    if (tmp_file == NULL) {
+        fprintf(stderr, "Failed to create temporary file: %s\n", strerror(errno));
+        free(entries);
+        free(tree_data);
+        return NULL;
+    }
+    
+    // Write tree data to temporary file
+    fwrite(tree_data, 1, tree_size, tmp_file);
+    fclose(tmp_file);
+    
+    // Compress using system commands (for compatibility)
+    int compression_success = 0;
+    char cmd[512];
+    
+    // Try perl
+    snprintf(cmd, sizeof(cmd), 
+        "perl -MCompress::Zlib -e 'undef $/; open(F,\"%s\");$i=join(\"\",<F>);close(F); "
+        "$c=compress($i);open(F,\">%s\");print F $c;close(F);' 2>/dev/null", 
+        tmp_path, obj_path);
+    
+    if (system(cmd) == 0) {
+        compression_success = 1;
+    }
+    
+    // Try Python if perl failed
+    if (!compression_success) {
+        snprintf(cmd, sizeof(cmd), 
+            "python3 -c 'import zlib, sys; "
+            "data = open(\"%s\", \"rb\").read(); "
+            "compressed = zlib.compress(data); "
+            "open(\"%s\", \"wb\").write(compressed)' 2>/dev/null", 
+            tmp_path, obj_path);
+        
+        if (system(cmd) == 0) {
+            compression_success = 1;
+        }
+    }
+    
+    // Try Python2 if Python3 failed
+    if (!compression_success) {
+        snprintf(cmd, sizeof(cmd), 
+            "python -c 'import zlib, sys; "
+            "data = open(\"%s\", \"rb\").read(); "
+            "compressed = zlib.compress(data); "
+            "open(\"%s\", \"wb\").write(compressed)' 2>/dev/null", 
+            tmp_path, obj_path);
+        
+        if (system(cmd) == 0) {
+            compression_success = 1;
+        }
+    }
+    
+    // Clean up
+    unlink(tmp_path);
+    free(tree_data);
+    
+    char *result = NULL;
+    if (compression_success) {
+        result = strdup(hash_hex);
+    } else {
+        fprintf(stderr, "Failed to compress tree object\n");
+    }
+    
+    free(entries);
+    return result;
+}
+
+// Function to handle the write-tree command
+int cmd_write_tree() {
+    char *hash = write_tree_directory(".");
+    if (hash == NULL) {
+        return 1;
+    }
+    
+    printf("%s\n", hash);
+    free(hash);
+    return 0;
+}
+
+// Update main function to include write-tree
 int main(int argc, char *argv[]) {
     // Disable output buffering
     setbuf(stdout, NULL);
@@ -598,6 +881,8 @@ int main(int argc, char *argv[]) {
         return cmd_hash_object(argc, argv);
     } else if (strcmp(command, "ls-tree") == 0) {
         return cmd_ls_tree(argc, argv);
+    } else if (strcmp(command, "write-tree") == 0) {
+        return cmd_write_tree();
     } else {
         fprintf(stderr, "Unknown command %s\n", command);
         return 1;
