@@ -7,10 +7,13 @@ LDFLAGS = -lcurl -lz
 TARGET = main
 
 # Source files
-SRC = main.c
+SRC = src/main.c
 
 # Object files
 OBJ = $(SRC:.c=.o)
+
+# Create build directory if it doesn't exist
+$(shell mkdir -p $(dir $(OBJ)))
 
 # Build rules
 all: $(TARGET)
