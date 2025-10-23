@@ -1,5 +1,6 @@
 #include "git_common.h"
 #include "git_object.h"
+#include "git_sha1.h"
 #include "git_validation.h"
 #include <stdio.h>
 #include <string.h>
