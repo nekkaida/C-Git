@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "git_common.h"
 #include "git_object.h"
 #include "git_sha1.h"
