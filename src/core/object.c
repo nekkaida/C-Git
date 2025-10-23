@@ -9,6 +9,12 @@
 #include <errno.h>
 
 git_object* git_object_new(git_object_t type, size_t size) {
+    // Enforce maximum object size limit
+    if (size > MAX_OBJECT_SIZE) {
+        git_error_set(GIT_EOVERFLOW, "Object size exceeds maximum allowed size");
+        return NULL;
+    }
+
     git_object *obj = (git_object *)calloc(1, sizeof(git_object));
     if (!obj) {
         git_error_set(GIT_ENOMEM, "Failed to allocate object");

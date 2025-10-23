@@ -79,7 +79,13 @@ int git_tree_builder_add(git_tree_builder *builder, const char *mode,
         return GIT_EINVALID;
     }
 
-    // Check if we need to resize - FIX REALLOC BUG!
+    // Enforce maximum tree entries limit
+    if (builder->count >= MAX_TREE_ENTRIES) {
+        git_error_set(GIT_EOVERFLOW, "Tree has too many entries");
+        return GIT_EOVERFLOW;
+    }
+
+    // Check if we need to resize
     if (builder->count >= builder->capacity) {
         size_t new_capacity = builder->capacity * 2;
         git_tree_entry *new_entries = (git_tree_entry *)realloc(

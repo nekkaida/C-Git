@@ -15,6 +15,10 @@
 #define MAX_CMD_LEN 8192
 #define MAX_TREE_DEPTH 100
 #define MAX_FILE_SIZE (100 * 1024 * 1024)  // 100MB
+#define MAX_OBJECT_SIZE (100 * 1024 * 1024)  // 100MB max object size
+#define MAX_TREE_ENTRIES 10000  // Max entries in a single tree
+#define MAX_MESSAGE_SIZE (10 * 1024)  // 10KB max commit message
+#define MAX_NAME_SIZE 1024  // Max length for author/committer names
 
 // Error codes
 typedef enum {

@@ -35,6 +35,12 @@ int cmd_commit_tree(int argc, char *argv[]) {
         return GIT_EINVALID;
     }
 
+    // Validate message size
+    if (strlen(message) > MAX_MESSAGE_SIZE) {
+        fprintf(stderr, "Commit message too long (max %d bytes)\n", MAX_MESSAGE_SIZE);
+        return GIT_EINVALID;
+    }
+
     // Validate tree SHA
     if (!git_validate_sha1_hex(tree_sha)) {
         fprintf(stderr, "Invalid tree SHA-1: %s\n", tree_sha);
