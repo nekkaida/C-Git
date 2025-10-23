@@ -96,15 +96,30 @@ int cmd_commit_tree(int argc, char *argv[]) {
         return GIT_ERROR;
     }
 
-    // Calculate buffer size needed
+    // Calculate buffer size needed - with overflow protection
     size_t buffer_size = 1024;  // Start with reasonable size
-    buffer_size += strlen(tree_sha);
-    if (parent_sha != NULL) {
-        buffer_size += strlen(parent_sha) + 10;
+
+    size_t tree_len = strlen(tree_sha);
+    size_t parent_len = parent_sha ? strlen(parent_sha) : 0;
+    size_t author_len = strlen(author);
+    size_t committer_len = strlen(committer);
+    size_t message_len = strlen(message);
+
+    // Check for overflow in individual additions
+    size_t additions = tree_len + author_len + committer_len + message_len + 120;
+    if (parent_sha) {
+        if (additions > SIZE_MAX - parent_len - 10) {
+            fprintf(stderr, "Commit content size would overflow\n");
+            return GIT_EOVERFLOW;
+        }
+        additions += parent_len + 10;
     }
-    buffer_size += strlen(author) + 50;
-    buffer_size += strlen(committer) + 50;
-    buffer_size += strlen(message) + 10;
+
+    if (buffer_size > SIZE_MAX - additions) {
+        fprintf(stderr, "Commit buffer size would overflow\n");
+        return GIT_EOVERFLOW;
+    }
+    buffer_size += additions;
 
     char *commit_content = (char *)malloc(buffer_size);
     if (commit_content == NULL) {
