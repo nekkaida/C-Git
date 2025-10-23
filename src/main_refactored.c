@@ -30,7 +30,7 @@ static void print_usage(const char *program) {
 
 // Print version information
 static void print_version(void) {
-    printf("C-Git version 0.3.4 (I/O Hardening Release)\n");
+    printf("C-Git version 0.3.5 (Security Hardening Release)\n");
     printf("A lightweight educational Git implementation\n");
     printf("\n");
     printf("Built with:\n");
