@@ -31,6 +31,7 @@ obj/
 # Editor and IDE files
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
