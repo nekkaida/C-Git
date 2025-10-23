@@ -57,7 +57,6 @@ int cmd_commit_tree(int argc, char *argv[]) {
     // Get timezone offset (cross-platform)
     struct tm *tm_local = localtime(&now);
     struct tm tm_local_copy = *tm_local;  // Copy before calling gmtime
-    struct tm *tm_utc = gmtime(&now);
 
     // Calculate offset in seconds
     long tz_offset = 0;
@@ -71,28 +70,32 @@ int cmd_commit_tree(int argc, char *argv[]) {
         tz_offset += 3600;  // Add DST hour
     }
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-    // BSD systems: tm_gmtoff is available but not via __USE_MISC
+    // BSD systems: tm_gmtoff is available
     tz_offset = tm_local_copy.tm_gmtoff;
 #elif defined(__linux__) || defined(__GLIBC__)
-    // Linux/glibc: tm_gmtoff available
-    tz_offset = tm_local_copy.tm_gmtoff;
+    // Linux/glibc: tm_gmtoff available (may need __tm_gmtoff on some glibc versions)
+    #ifdef __tm_gmtoff
+        tz_offset = tm_local_copy.__tm_gmtoff;
+    #else
+        tz_offset = tm_local_copy.tm_gmtoff;
+    #endif
 #else
     // Fallback: calculate from difference between local and UTC
     // Note: mktime() treats tm as local time, so we calculate offset differently
-    time_t local_time = mktime(&tm_local_copy);
-    // Recalculate UTC time properly
+    struct tm *tm_utc = gmtime(&now);
     struct tm tm_utc_copy = *tm_utc;
     tm_utc_copy.tm_isdst = 0;  // UTC has no DST
     // For systems without tm_gmtoff, approximate using localtime difference
     // This is not perfect but works for most cases
-    tz_offset = (long)difftime(now, mktime(tm_utc));
+    tz_offset = (long)difftime(now, mktime(&tm_utc_copy));
+    (void)tm_local_copy;  // Suppress unused warning
 #endif
 
     int tz_hours = (int)(tz_offset / 3600);
-    int tz_mins = (int)(abs(tz_offset % 3600) / 60);
+    int tz_mins = (int)(labs(tz_offset % 3600) / 60);
     char tz_str[10];
-    int ret = snprintf(tz_str, sizeof(tz_str), "%+03d%02d", tz_hours, tz_mins);
-    if (ret < 0 || ret >= (int)sizeof(tz_str)) {
+    int tz_ret = snprintf(tz_str, sizeof(tz_str), "%+03d%02d", tz_hours, tz_mins);
+    if (tz_ret < 0 || tz_ret >= (int)sizeof(tz_str)) {
         fprintf(stderr, "Failed to format timezone string\n");
         return GIT_ERROR;
     }
