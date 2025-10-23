@@ -73,12 +73,8 @@ int cmd_commit_tree(int argc, char *argv[]) {
     // BSD systems: tm_gmtoff is available
     tz_offset = tm_local_copy.tm_gmtoff;
 #elif defined(__linux__) || defined(__GLIBC__)
-    // Linux/glibc: tm_gmtoff available (may need __tm_gmtoff on some glibc versions)
-    #ifdef __tm_gmtoff
-        tz_offset = tm_local_copy.__tm_gmtoff;
-    #else
-        tz_offset = tm_local_copy.tm_gmtoff;
-    #endif
+    // Linux/glibc: use __tm_gmtoff (glibc internal name)
+    tz_offset = tm_local_copy.__tm_gmtoff;
 #else
     // Fallback: calculate from difference between local and UTC
     // Note: mktime() treats tm as local time, so we calculate offset differently
