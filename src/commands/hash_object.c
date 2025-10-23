@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <unistd.h>
 
 int cmd_hash_object(int argc, char *argv[]) {
     int write_object = 0;
