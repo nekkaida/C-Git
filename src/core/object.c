@@ -226,7 +226,11 @@ int git_object_write(git_object *obj) {
     header[header_len] = '\0';
     header_len++;
 
-    // Combine header and data
+    // Combine header and data - check for integer overflow
+    if (obj->size > SIZE_MAX - (size_t)header_len) {
+        git_error_set(GIT_EOVERFLOW, "Object size too large (would overflow)");
+        return GIT_EOVERFLOW;
+    }
     size_t full_size = header_len + obj->size;
     unsigned char *full_data = malloc(full_size);
     if (!full_data) {
