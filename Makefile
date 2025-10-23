@@ -1,7 +1,18 @@
 # Compiler settings
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -Werror -Wpedantic -O2 -g -Iinclude
-LDFLAGS = -lz
+
+# Base flags
+CFLAGS_BASE = -std=c11 -Wall -Wextra -Werror -Wpedantic -O2 -g -Iinclude
+
+# Security hardening flags
+CFLAGS_SECURITY = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE \
+                  -Wformat -Wformat-security -Wformat=2 -fno-strict-overflow
+
+# Combined flags
+CFLAGS = $(CFLAGS_BASE) $(CFLAGS_SECURITY)
+
+# Linker flags with security hardening
+LDFLAGS = -lz -pie -Wl,-z,relro,-z,now
 
 # Platform detection
 UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
