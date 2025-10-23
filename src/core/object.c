@@ -134,7 +134,11 @@ int git_object_decompress(const void *src, size_t src_len,
         return GIT_EINVALID;
     }
 
-    // Start with a reasonable buffer size
+    // Start with a reasonable buffer size - check for overflow
+    if (src_len > SIZE_MAX / 4) {
+        git_error_set(GIT_EOVERFLOW, "Source too large for decompression buffer");
+        return GIT_EOVERFLOW;
+    }
     size_t buffer_size = src_len * 4;  // Usually good estimate
     *dst = malloc(buffer_size);
     if (!*dst) {
@@ -150,6 +154,11 @@ int git_object_decompress(const void *src, size_t src_len,
     // If buffer was too small, try with larger buffer
     if (result == Z_BUF_ERROR) {
         free(*dst);
+        // Check for overflow before multiplying by 10
+        if (src_len > SIZE_MAX / 10) {
+            git_error_set(GIT_EOVERFLOW, "Source too large for larger decompression buffer");
+            return GIT_EOVERFLOW;
+        }
         buffer_size = src_len * 10;  // Try much larger
         *dst = malloc(buffer_size);
         if (!*dst) {
