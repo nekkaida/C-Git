@@ -1,5 +1,6 @@
 #include "git_sha1.h"
 #include <string.h>
+#include <stdio.h>
 #include <ctype.h>
 
 #define rol(value, bits) (((value) << (bits)) | ((value) >> (32 - (bits))))
