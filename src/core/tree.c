@@ -1,3 +1,28 @@
+/**
+ * @file tree.c
+ * @brief Git tree object builder
+ *
+ * TODO(Phase 1): Tree diff
+ *   - Compare two trees and list differences
+ *   - Needed for: git diff, git status vs HEAD
+ *   - Output: added, deleted, modified, renamed files
+ *
+ * TODO(Phase 1): Symlink support
+ *   - Mode 120000 for symbolic links
+ *   - Store link target as blob content
+ *   - Platform-specific handling on Windows
+ *
+ * TODO(Phase 2): Submodule support
+ *   - Mode 160000 (GIT_FILEMODE_COMMIT)
+ *   - Store commit SHA of submodule
+ *   - Read .gitmodules for submodule URLs
+ *
+ * TODO(Phase 3): Tree walking API
+ *   - Callback-based tree traversal
+ *   - Support for pathspec filtering
+ *   - Used by: ls-files, checkout, clean
+ */
+
 #include "git_tree.h"
 #include "git_object.h"
 #include "git_sha1.h"

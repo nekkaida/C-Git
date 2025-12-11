@@ -1,3 +1,32 @@
+/**
+ * @file object.c
+ * @brief Git object storage implementation
+ *
+ * TODO(Phase 1): Pack file support
+ *   - Read objects from pack files (.git/objects/pack/*.pack)
+ *   - Pack index parsing (.idx files)
+ *   - Delta reconstruction (OFS_DELTA, REF_DELTA)
+ *
+ * TODO(Phase 1): Loose object optimization
+ *   - Object caching (LRU cache for recently accessed)
+ *   - Memory-mapped file access for large objects
+ *
+ * TODO(Phase 2): Pack file creation
+ *   - git gc / git repack functionality
+ *   - Delta compression between similar objects
+ *   - Sliding window delta algorithm
+ *
+ * TODO(Phase 2): Object verification
+ *   - git fsck functionality
+ *   - Verify SHA-1 matches content on read
+ *   - Check for corrupted objects
+ *
+ * TODO(Phase 3): Alternates support
+ *   - Read .git/objects/info/alternates
+ *   - Search alternate object directories
+ *   - Shared object storage between repositories
+ */
+
 #include "git_object.h"
 #include "git_sha1.h"
 #include "git_validation.h"

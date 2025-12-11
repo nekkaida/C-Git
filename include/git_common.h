@@ -1,3 +1,25 @@
+/**
+ * @file git_common.h
+ * @brief Common definitions, constants, and error codes for C-Git
+ *
+ * TODO(Phase 1): Configuration system
+ *   - Add git_config structure
+ *   - Parse .git/config, ~/.gitconfig, /etc/gitconfig
+ *   - Support for config get/set API
+ *
+ * TODO(Phase 2): Reference system
+ *   - Add git_reference structure
+ *   - Symbolic refs (HEAD -> refs/heads/main)
+ *   - Packed-refs support
+ *   - Reflog support
+ *
+ * TODO(Phase 3): Repository structure
+ *   - Add git_repository structure
+ *   - Repository discovery (walk up to find .git)
+ *   - Bare repository support
+ *   - Worktree support
+ */
+
 #ifndef GIT_COMMON_H
 #define GIT_COMMON_H
 
