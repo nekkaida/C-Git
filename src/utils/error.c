@@ -2,8 +2,9 @@
 #include <string.h>
 #include <stdio.h>
 
-// Thread-local error state (simplified version without thread support)
-static struct {
+// Thread-local error state (C11 _Thread_local for thread safety)
+// Each thread gets its own error state, preventing race conditions
+static _Thread_local struct {
     git_error_t code;
     char message[1024];
 } g_error = {GIT_OK, ""};
