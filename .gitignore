@@ -45,3 +45,16 @@ tmp/
 
 # Specific to this project
 .git-test/
+test-repo/
+
+# Test binaries
+test_sha1
+test_validation
+test_object
+
+# Fuzz binaries and corpus
+fuzz_sha1
+fuzz_object
+fuzz_validation
+corpus_*/
+crash-*
