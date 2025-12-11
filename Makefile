@@ -4,15 +4,35 @@ CC = gcc
 # Base flags
 CFLAGS_BASE = -std=c11 -Wall -Wextra -Werror -Wpedantic -O2 -g -Iinclude
 
-# Security hardening flags
-CFLAGS_SECURITY = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE \
-                  -Wformat -Wformat-security -Wformat=2 -fno-strict-overflow
+# Warning flags (comprehensive)
+CFLAGS_WARN = -Wconversion -Wimplicit-fallthrough -Wformat=2 \
+              -Wformat-security -Werror=format-security \
+              -Wshadow -Wpointer-arith -Wcast-qual -Wstrict-prototypes \
+              -Wmissing-prototypes -Wredundant-decls -Wnested-externs \
+              -Wdouble-promotion -Wnull-dereference
+
+# Security hardening flags (OpenSSF recommended)
+CFLAGS_SECURITY = -fstack-protector-strong -fstack-clash-protection \
+                  -D_FORTIFY_SOURCE=2 -fPIE \
+                  -fno-strict-overflow -fno-strict-aliasing \
+                  -fno-delete-null-pointer-checks \
+                  -ftrivial-auto-var-init=zero
+
+# Architecture-specific hardening
+UNAME_M := $(shell uname -m 2>/dev/null || echo unknown)
+ifeq ($(UNAME_M),x86_64)
+    CFLAGS_ARCH = -fcf-protection=full
+else ifeq ($(UNAME_M),aarch64)
+    CFLAGS_ARCH = -mbranch-protection=standard
+else
+    CFLAGS_ARCH =
+endif
 
 # Combined flags
-CFLAGS = $(CFLAGS_BASE) $(CFLAGS_SECURITY)
+CFLAGS = $(CFLAGS_BASE) $(CFLAGS_WARN) $(CFLAGS_SECURITY) $(CFLAGS_ARCH)
 
-# Linker flags with security hardening
-LDFLAGS = -lz -pie -Wl,-z,relro,-z,now
+# Linker flags with security hardening (OpenSSF recommended)
+LDFLAGS = -lz -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack -Wl,-z,nodlopen
 
 # Platform detection
 UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
@@ -35,18 +55,28 @@ SRC_DIR = src
 CORE_DIR = $(SRC_DIR)/core
 UTILS_DIR = $(SRC_DIR)/utils
 COMMANDS_DIR = $(SRC_DIR)/commands
+TESTS_DIR = tests
 OBJ_DIR = build
 BIN_DIR = .
 
+# Test binaries
+TEST_BINS = $(BIN_DIR)/test_sha1 $(BIN_DIR)/test_validation $(BIN_DIR)/test_object
+
+# Library objects (for linking with tests)
+LIB_OBJS = $(CORE_OBJS) $(UTILS_OBJS)
+
 # Source files
-CORE_SRCS = $(CORE_DIR)/sha1.c $(CORE_DIR)/object.c $(CORE_DIR)/tree.c
+CORE_SRCS = $(CORE_DIR)/sha1.c $(CORE_DIR)/object.c $(CORE_DIR)/tree.c $(CORE_DIR)/index.c
 UTILS_SRCS = $(UTILS_DIR)/validation.c $(UTILS_DIR)/error.c
 COMMANDS_SRCS = $(COMMANDS_DIR)/init.c \
                 $(COMMANDS_DIR)/hash_object.c \
                 $(COMMANDS_DIR)/cat_file.c \
                 $(COMMANDS_DIR)/ls_tree.c \
                 $(COMMANDS_DIR)/write_tree.c \
-                $(COMMANDS_DIR)/commit_tree.c
+                $(COMMANDS_DIR)/commit_tree.c \
+                $(COMMANDS_DIR)/add.c \
+                $(COMMANDS_DIR)/status.c \
+                $(COMMANDS_DIR)/log.c
 MAIN_SRC = $(SRC_DIR)/main_refactored.c
 
 ALL_SRCS = $(CORE_SRCS) $(UTILS_SRCS) $(COMMANDS_SRCS) $(MAIN_SRC)
@@ -126,7 +156,7 @@ endif
 	@echo "Basic tests passed!"
 
 # More comprehensive testing
-test-all: test
+test-all: test test-unit
 	@echo "Running all tests..."
 	@cd test-repo && \
 	TREE_HASH=$$(../$(TARGET) write-tree) && \
@@ -134,9 +164,66 @@ test-all: test
 	../$(TARGET) ls-tree $$TREE_HASH
 	@echo "All tests passed!"
 
+# Unit tests
+test-unit: $(TEST_BINS)
+	@echo "Running unit tests..."
+	@echo ""
+	@echo "=== SHA-1 Tests ==="
+	@./test_sha1
+	@echo ""
+	@echo "=== Validation Tests ==="
+	@./test_validation
+	@echo ""
+	@echo "=== Object Tests ==="
+	@./test_object
+	@echo ""
+	@echo "All unit tests completed!"
+
+# Build test binaries
+$(BIN_DIR)/test_sha1: $(TESTS_DIR)/test_sha1.c $(LIB_OBJS)
+	@echo "Building test_sha1..."
+	$(CC) $(CFLAGS_BASE) -I$(TESTS_DIR) -o $@ $< $(LIB_OBJS) $(LDFLAGS)
+
+$(BIN_DIR)/test_validation: $(TESTS_DIR)/test_validation.c $(LIB_OBJS)
+	@echo "Building test_validation..."
+	$(CC) $(CFLAGS_BASE) -I$(TESTS_DIR) -o $@ $< $(LIB_OBJS) $(LDFLAGS)
+
+$(BIN_DIR)/test_object: $(TESTS_DIR)/test_object.c $(LIB_OBJS)
+	@echo "Building test_object..."
+	$(CC) $(CFLAGS_BASE) -I$(TESTS_DIR) -o $@ $< $(LIB_OBJS) $(LDFLAGS)
+
+# Clean tests
+clean-tests:
+	$(RM) $(TEST_BINS) 2>/dev/null || true
+
 # Run with Valgrind to check for memory leaks
 valgrind: $(BIN_DIR)/$(TARGET)
-	valgrind --leak-check=full --show-leak-kinds=all ./$(TARGET) init
+	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(TARGET) init
+
+# Build with AddressSanitizer
+asan: clean
+	$(MAKE) CFLAGS="$(CFLAGS_BASE) -fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+		LDFLAGS="-lz -fsanitize=address,undefined"
+
+# Build with MemorySanitizer (requires clang)
+msan: clean
+	$(MAKE) CC=clang CFLAGS="$(CFLAGS_BASE) -fsanitize=memory -fno-omit-frame-pointer -g" \
+		LDFLAGS="-lz -fsanitize=memory"
+
+# Build with ThreadSanitizer
+tsan: clean
+	$(MAKE) CFLAGS="$(CFLAGS_BASE) -fsanitize=thread -g" LDFLAGS="-lz -fsanitize=thread"
+
+# Static analysis with cppcheck
+cppcheck:
+	@echo "Running cppcheck static analysis..."
+	cppcheck --enable=all --std=c11 --error-exitcode=1 \
+		--suppress=missingIncludeSystem \
+		-I include $(SRC_DIR)
+
+# Static analysis with clang-analyzer (scan-build)
+scan-build: clean
+	scan-build --status-bugs $(MAKE) all
 
 # Code formatting (if clang-format is available)
 format:
@@ -159,12 +246,19 @@ help:
 	@echo "  all         - Build the project (default)"
 	@echo "  clean       - Remove build files"
 	@echo "  check_deps  - Check if dependencies are installed"
-	@echo "  test        - Run basic tests"
-	@echo "  test-all    - Run comprehensive tests"
+	@echo "  test        - Run basic integration tests"
+	@echo "  test-unit   - Run unit tests (TAP format)"
+	@echo "  test-all    - Run all tests (integration + unit)"
+	@echo "  clean-tests - Remove test binaries"
 	@echo "  valgrind    - Run with memory leak detection"
+	@echo "  asan        - Build with AddressSanitizer + UBSan"
+	@echo "  msan        - Build with MemorySanitizer (requires clang)"
+	@echo "  tsan        - Build with ThreadSanitizer"
+	@echo "  cppcheck    - Run cppcheck static analysis"
+	@echo "  scan-build  - Run clang static analyzer"
 	@echo "  format      - Format code with clang-format"
 	@echo "  install     - Install to /usr/local/bin"
 	@echo "  info        - Show build configuration"
 	@echo "  help        - Show this help message"
 
-.PHONY: all clean check_deps install test test-all valgrind format info help
+.PHONY: all clean clean-tests check_deps install test test-unit test-all valgrind asan msan tsan cppcheck scan-build format info help
